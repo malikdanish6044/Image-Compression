@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QuadZip — Quadtree Image Compressor</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a26;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.13);
+    --accent: #6c63ff;
+    --accent2: #ff6584;
+    --accent3: #43e97b;
+    --text: #f0f0ff;
+    --muted: #7a7a9a;
+    --mono: 'DM Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+    --display: 'Syne', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none; z-index: 0; opacity: 0.4;
+  }
+
+  /* HEADER */
+  header {
+    position: sticky; top: 0; z-index: 100;
+    padding: 1.1rem 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(16px);
+    background: rgba(10,10,15,0.85);
+  }
+  .logo { font-family: var(--display); font-size: 1.5rem; font-weight: 800; letter-spacing: -0.03em; }
+  .logo span { color: var(--accent); }
+  .header-right { display: flex; align-items: center; gap: 0.75rem; }
+  .badge { font-family: var(--mono); font-size: 0.65rem; background: rgba(108,99,255,0.15); color: var(--accent); border: 1px solid rgba(108,99,255,0.3); padding: 0.25rem 0.6rem; border-radius: 2rem; letter-spacing: 0.05em; }
+  .live-badge { font-family: var(--mono); font-size: 0.65rem; background: rgba(67,233,123,0.15); color: var(--accent3); border: 1px solid rgba(67,233,123,0.3); padding: 0.25rem 0.6rem; border-radius: 2rem; letter-spacing: 0.05em; display: flex; align-items: center; gap: 0.35rem; }
+  .live-dot { width: 6px; height: 6px; background: var(--accent3); border-radius: 50%; animation: livePulse 1.5s infinite; }
+  @keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.4)} }
+
+  /* HERO */
+  .hero { position: relative; z-index: 1; padding: 3rem 2rem 1.5rem; text-align: center; max-width: 700px; margin: 0 auto; animation: fadeUp 0.6s ease both; }
+  .hero h1 { font-family: var(--display); font-size: clamp(2rem,5vw,3.4rem); font-weight: 800; line-height: 1.1; letter-spacing: -0.04em; margin-bottom: 0.75rem; }
+  .hero h1 .line2 { color: var(--accent); }
+  .hero p { color: var(--muted); font-size: 1rem; line-height: 1.7; max-width: 460px; margin: 0 auto; }
+
+  .glow { position: fixed; width: 600px; height: 600px; border-radius: 50%; background: radial-gradient(circle, rgba(108,99,255,0.1) 0%, transparent 70%); pointer-events: none; z-index: 0; top: -200px; left: 50%; transform: translateX(-50%); }
+
+  /* MAIN */
+  .main { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+
+  /* UPLOAD */
+  .upload-section { margin-bottom: 1.5rem; }
+  .drop-zone { border: 2px dashed var(--border2); border-radius: 1.25rem; padding: 2.5rem 2rem; text-align: center; cursor: pointer; transition: all 0.25s ease; background: var(--surface); position: relative; overflow: hidden; }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(108,99,255,0.05); transform: translateY(-2px); box-shadow: 0 0 40px rgba(108,99,255,0.12); }
+  .drop-icon { width: 56px; height: 56px; margin: 0 auto 0.85rem; background: rgba(108,99,255,0.12); border-radius: 1rem; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; border: 1px solid rgba(108,99,255,0.2); }
+  .drop-zone h3 { font-family: var(--display); font-size: 1.1rem; font-weight: 700; margin-bottom: 0.35rem; }
+  .drop-zone p { color: var(--muted); font-size: 0.88rem; }
+  .drop-zone p span { color: var(--accent); text-decoration: underline; cursor: pointer; }
+  #file-input { display: none; }
+
+  /* TABS for view mode */
+  .view-tabs { display: flex; gap: 0.4rem; background: var(--surface2); border-radius: 0.75rem; padding: 0.3rem; margin-bottom: 1.5rem; width: fit-content; }
+  .view-tab { font-family: var(--mono); font-size: 0.72rem; padding: 0.45rem 1rem; border-radius: 0.5rem; border: none; cursor: pointer; transition: all 0.2s; background: transparent; color: var(--muted); letter-spacing: 0.05em; }
+  .view-tab.active { background: var(--accent); color: #fff; }
+  .view-tab:hover:not(.active) { color: var(--text); background: var(--border); }
+
+  /* CONTROLS */
+  .controls-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 1.25rem; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; animation: fadeUp 0.6s 0.1s ease both; }
+  .controls-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 1.25rem; align-items: end; }
+  .ctrl { display: flex; flex-direction: column; gap: 0.5rem; }
+  .ctrl label { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; }
+  .ctrl-row { display: flex; align-items: center; gap: 0.75rem; }
+  .ctrl-row input[type=range] { flex: 1; height: 4px; -webkit-appearance: none; appearance: none; background: var(--border2); border-radius: 2px; cursor: pointer; transition: all 0.2s; }
+  .ctrl-row input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 10px rgba(108,99,255,0.5); cursor: pointer; }
+  .ctrl-val { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); min-width: 28px; text-align: right; }
+  .ctrl-hint { font-size: 0.7rem; color: #444; margin-top: 0.15rem; }
+
+  /* Live toggle */
+  .live-toggle-wrap { display: flex; align-items: center; gap: 0.5rem; }
+  .live-toggle-label { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); }
+  .toggle { position: relative; width: 38px; height: 22px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; inset: 0; background: var(--border2); border-radius: 22px; cursor: pointer; transition: 0.3s; }
+  .toggle-slider::before { content:''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: var(--muted); border-radius: 50%; transition: 0.3s; }
+  input:checked + .toggle-slider { background: var(--accent3); }
+  input:checked + .toggle-slider::before { transform: translateX(16px); background: #fff; }
+
+  .btn-compress { background: var(--accent); color: #fff; border: none; border-radius: 0.75rem; padding: 0.85rem 1.75rem; font-family: var(--display); font-size: 0.95rem; font-weight: 700; cursor: pointer; letter-spacing: -0.01em; transition: all 0.2s; white-space: nowrap; display: flex; align-items: center; gap: 0.5rem; }
+  .btn-compress:hover { background: #5a52ee; transform: translateY(-2px); box-shadow: 0 8px 24px rgba(108,99,255,0.35); }
+  .btn-compress:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; animation: spin 0.7s linear infinite; display: none; }
+  .btn-compress.loading .spinner { display: block; }
+  .btn-compress.loading .btn-text { display: none; }
+
+  /* STATS */
+  .stats-bar { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.85rem; margin-bottom: 1.5rem; animation: fadeUp 0.6s 0.15s ease both; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 1rem; padding: 0.85rem 1rem; transition: all 0.3s; }
+  .stat-card.active { border-color: rgba(108,99,255,0.35); }
+  .stat-label { font-family: var(--mono); font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.35rem; }
+  .stat-value { font-family: var(--display); font-size: 1.3rem; font-weight: 700; letter-spacing: -0.03em; }
+  .stat-value.green { color: var(--accent3); }
+  .stat-value.purple { color: var(--accent); }
+  .stat-value.red { color: var(--accent2); }
+  .stat-sub { font-family: var(--mono); font-size: 0.62rem; color: var(--muted); margin-top: 0.2rem; }
+
+  /* CANVAS AREA */
+  .canvas-section { animation: fadeUp 0.6s 0.2s ease both; }
+
+  /* SPLIT VIEW */
+  .split-container { position: relative; border-radius: 1.25rem; overflow: hidden; background: var(--surface); border: 1px solid var(--border); user-select: none; }
+  .split-header { padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+  .split-title { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .split-hint { font-family: var(--mono); font-size: 0.65rem; color: var(--muted); }
+  .split-canvas-wrap { position: relative; min-height: 380px; display: flex; align-items: center; justify-content: center; background: #0d0d14; overflow: hidden; cursor: col-resize; }
+  #split-display-canvas { display: block; max-width: 100%; border-radius: 0; cursor: col-resize; }
+  .split-divider { position: absolute; top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,0.9); z-index: 10; pointer-events: none; left: 50%; transform: translateX(-50%); box-shadow: 0 0 8px rgba(0,0,0,0.5); }
+  .split-handle { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 38px; height: 38px; background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: #111; box-shadow: 0 2px 16px rgba(0,0,0,0.6); font-weight: 900; letter-spacing: -1px; pointer-events: none; }
+  .split-label { position: absolute; top: 12px; font-family: var(--mono); font-size: 0.7rem; padding: 0.2rem 0.6rem; border-radius: 1rem; z-index: 5; pointer-events: none; }
+  .split-label-orig { left: 12px; background: rgba(0,0,0,0.7); color: #aaa; border: 1px solid rgba(255,255,255,0.1); }
+  .split-label-comp { right: 12px; background: rgba(108,99,255,0.8); color: #fff; }
+  .split-footer { padding: 0.85rem 1.25rem; border-top: 1px solid var(--border); display: flex; gap: 0.75rem; }
+
+  /* SIDE BY SIDE */
+  .canvas-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+  .canvas-card { background: var(--surface); border: 1px solid var(--border); border-radius: 1.25rem; overflow: hidden; position: relative; transition: border-color 0.3s; }
+  .canvas-header { padding: 0.85rem 1.25rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+  .canvas-title { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .canvas-badge { font-family: var(--mono); font-size: 0.65rem; padding: 0.2rem 0.5rem; border-radius: 1rem; }
+  .badge-orig { background: rgba(255,255,255,0.07); color: var(--muted); }
+  .badge-comp { background: rgba(108,99,255,0.15); color: var(--accent); }
+  .badge-viz { background: rgba(255,101,132,0.15); color: var(--accent2); }
+  .canvas-body { padding: 1rem; display: flex; align-items: center; justify-content: center; min-height: 280px; background: repeating-conic-gradient(rgba(255,255,255,0.03) 0% 25%, transparent 0% 50%) 0 0 / 20px 20px; overflow: hidden; }
+  canvas.display { max-width: 100%; max-height: 360px; border-radius: 0.5rem; object-fit: contain; display: block; }
+  .placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; color: var(--muted); font-size: 0.88rem; text-align: center; }
+  .placeholder-icon { font-size: 2.2rem; opacity: 0.3; }
+  .canvas-footer { padding: 0.85rem 1.25rem; border-top: 1px solid var(--border); display: flex; gap: 0.75rem; }
+  .btn-dl { flex: 1; background: transparent; border: 1px solid var(--border2); border-radius: 0.6rem; color: var(--text); font-family: var(--sans); font-size: 0.82rem; font-weight: 500; padding: 0.55rem 0.85rem; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 0.4rem; }
+  .btn-dl:hover { border-color: var(--accent); color: var(--accent); background: rgba(108,99,255,0.07); }
+  .btn-dl:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn-dl.primary { border-color: var(--accent3); color: var(--accent3); }
+  .btn-dl.primary:hover { background: rgba(67,233,123,0.08); }
+
+  /* SCAN + GLOW EFFECTS */
+  .scan-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 5; border-radius: 1.25rem; overflow: hidden; opacity: 0; }
+  .scan-overlay.scanning { opacity: 1; animation: scanFade 0.8s ease both; }
+  @keyframes scanFade { 0%{opacity:1} 100%{opacity:0} }
+  .scan-line { position: absolute; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: scanMove 0.8s ease both; box-shadow: 0 0 20px var(--accent); }
+  @keyframes scanMove { from{top:0} to{top:100%} }
+  @keyframes glowPulse { 0%{box-shadow:0 0 0px rgba(108,99,255,0)} 50%{box-shadow:0 0 50px rgba(108,99,255,0.3)} 100%{box-shadow:0 0 0px rgba(108,99,255,0)} }
+  .canvas-card.glow-flash { animation: glowPulse 1s ease both; }
+  @keyframes uploadFlash { 0%{border-color:var(--border2)} 30%{border-color:var(--accent3);box-shadow:0 0 30px rgba(67,233,123,0.25)} 100%{border-color:var(--border2)} }
+  .drop-zone.uploaded { animation: uploadFlash 0.8s ease both; }
+
+  /* SHIMMER */
+  @keyframes shimmer { 0%{background-position:-400px 0} 100%{background-position:400px 0} }
+  .canvas-body.loading { background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%); background-size: 800px 100%; animation: shimmer 1.2s infinite linear; }
+
+  /* TOAST */
+  .toast { position: fixed; bottom: 2rem; right: 2rem; background: var(--surface2); border: 1px solid var(--accent3); border-radius: 0.85rem; padding: 0.85rem 1.25rem; font-size: 0.85rem; color: var(--accent3); font-family: var(--mono); transform: translateY(4rem); opacity: 0; transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1); z-index: 1000; pointer-events: none; }
+  .toast.show { transform: translateY(0); opacity: 1; }
+
+  /* RATIO REVEAL */
+  .ratio-reveal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 999; opacity: 0; }
+  .ratio-reveal.show { animation: ratioRevealAnim 1.4s cubic-bezier(0.22,1,0.36,1) both; }
+  @keyframes ratioRevealAnim { 0%{opacity:0} 15%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+  .ratio-bubble { background: rgba(10,10,15,0.92); border: 1px solid var(--accent); border-radius: 2rem; padding: 1.5rem 3rem; text-align: center; box-shadow: 0 0 80px rgba(108,99,255,0.4); transform: scale(0); animation: bubblePop 1.4s cubic-bezier(0.34,1.56,0.64,1) both; }
+  @keyframes bubblePop { 0%{transform:scale(0)} 20%{transform:scale(1.08)} 35%{transform:scale(1)} 80%{transform:scale(1)} 100%{transform:scale(0.7)} }
+  .ratio-bubble .big-num { font-family: var(--display); font-size: 4rem; font-weight: 800; color: var(--accent3); line-height: 1; letter-spacing: -0.04em; }
+  .ratio-bubble .big-label { font-family: var(--mono); font-size: 0.8rem; color: var(--muted); margin-top: 0.3rem; letter-spacing: 0.1em; }
+
+  /* HISTORY PANEL */
+  .history-section { margin-top: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 1.25rem; padding: 1.25rem 1.5rem; }
+  .history-title { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 1rem; }
+  .history-list { display: flex; gap: 1rem; flex-wrap: wrap; }
+  .history-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 0.85rem; padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.85rem; cursor: pointer; transition: all 0.2s; min-width: 200px; flex: 1; }
+  .history-item:hover { border-color: var(--accent); background: rgba(108,99,255,0.06); }
+  .history-thumb { width: 44px; height: 44px; border-radius: 0.5rem; object-fit: cover; flex-shrink: 0; background: var(--border2); }
+  .history-meta { flex: 1; min-width: 0; }
+  .history-name { font-family: var(--mono); font-size: 0.7rem; color: var(--text); margin-bottom: 0.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .history-stats { font-family: var(--mono); font-size: 0.65rem; color: var(--muted); }
+  .history-ratio { font-family: var(--display); font-size: 1rem; font-weight: 700; color: var(--accent3); flex-shrink: 0; }
+  .history-empty { color: var(--muted); font-family: var(--mono); font-size: 0.78rem; }
+
+  /* ALGO INFO */
+  .algo-section { margin-top: 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 1.25rem; padding: 1.5rem 2rem; }
+  .algo-title { font-family: var(--display); font-size: 1rem; font-weight: 700; margin-bottom: 1rem; color: var(--accent); }
+  .algo-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 0.85rem; }
+  .algo-step { background: var(--surface2); border-radius: 0.75rem; padding: 0.85rem 1rem; border: 1px solid var(--border); display: flex; gap: 0.75rem; align-items: flex-start; }
+  .step-n { font-family: var(--mono); font-size: 0.68rem; background: rgba(108,99,255,0.15); color: var(--accent); border: 1px solid rgba(108,99,255,0.25); border-radius: 0.4rem; padding: 0.2rem 0.4rem; min-width: 26px; text-align: center; margin-top: 1px; }
+  .step-text { font-size: 0.82rem; color: var(--muted); line-height: 1.5; }
+  .step-text strong { color: var(--text); font-weight: 500; }
+
+  /* FOOTER BAR */
+  .footer-bar { margin-top: 2rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: center; padding: 1.1rem 1.5rem; background: var(--surface); border: 1px solid var(--border); border-radius: 1.25rem; }
+  .footer-item { display: flex; align-items: center; gap: 0.5rem; font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+  .footer-dot { width: 7px; height: 7px; border-radius: 50%; animation: pulse-dot 2s ease-in-out infinite; }
+  @keyframes pulse-dot { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.6);opacity:0.6} }
+
+  /* STAT ANIMATIONS */
+  @keyframes countUp { from{opacity:0;transform:translateY(8px) scale(0.85)} to{opacity:1;transform:translateY(0) scale(1)} }
+  .stat-value.animating { animation: countUp 0.45s cubic-bezier(0.34,1.56,0.64,1) both; }
+  @keyframes revealCard { from{opacity:0;transform:scale(0.97) translateY(12px)} to{opacity:1;transform:scale(1) translateY(0)} }
+  .canvas-card.revealed { animation: revealCard 0.5s cubic-bezier(0.34,1.2,0.64,1) both; }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+
+  /* LIVE INDICATOR */
+  .live-indicator { position: absolute; top: 12px; right: 12px; z-index: 10; font-family: var(--mono); font-size: 0.62rem; background: rgba(67,233,123,0.15); color: var(--accent3); border: 1px solid rgba(67,233,123,0.3); border-radius: 1rem; padding: 0.2rem 0.5rem; display: none; align-items: center; gap: 0.3rem; }
+  .live-indicator.visible { display: flex; }
+  .live-indicator-dot { width: 5px; height: 5px; background: var(--accent3); border-radius: 50%; animation: livePulse 1.5s infinite; }
+
+  /* PASTE HINT */
+  .paste-hint { text-align: center; margin-top: 0.6rem; font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+  .paste-hint kbd { background: var(--surface2); border: 1px solid var(--border2); border-radius: 4px; padding: 0.15rem 0.4rem; color: var(--accent); font-family: var(--mono); }
+
+  /* QUALITY METER */
+  .quality-meter { display: flex; align-items: center; gap: 0.5rem; }
+  .quality-bar { flex: 1; height: 4px; background: var(--border2); border-radius: 2px; overflow: hidden; }
+  .quality-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; background: var(--accent3); }
+  .quality-label { font-family: var(--mono); font-size: 0.65rem; color: var(--muted); min-width: 40px; }
+
+  /* PARTICLE BG */
+  #particle-canvas { position: fixed; top: 0; left: 0; pointer-events: none; z-index: 0; opacity: 0.3; }
+
+  /* RESPONSIVE */
+  @media (max-width: 900px) {
+    .stats-bar { grid-template-columns: repeat(3, 1fr); }
+    .controls-grid { grid-template-columns: 1fr 1fr; }
+    .btn-compress { grid-column: span 2; justify-content: center; }
+    .canvas-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .stats-bar { grid-template-columns: repeat(2, 1fr); }
+    .controls-grid { grid-template-columns: 1fr; }
+    .btn-compress { grid-column: 1; }
+    header { padding: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="glow"></div>
+<canvas id="particle-canvas"></canvas>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">Quad<span>Zip</span></div>
+  <div class="header-right">
+    <div class="live-badge" id="live-badge" style="display:none">
+      <span class="live-dot"></span> LIVE
+    </div>
+    <span class="badge">AOA Project</span>
+  </div>
+</header>
+
+<!-- HERO -->
+<div class="hero">
+  <h1>Compress Images<br><span class="line2">with Quadtrees</span></h1>
+  <p>Upload any image — watch the Quadtree algorithm divide & compress it. Split-view compare, live preview, and download instantly.</p>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- UPLOAD -->
+  <div class="upload-section">
+    <div class="drop-zone" id="drop-zone">
+      <input type="file" id="file-input" accept="image/*">
+      <div class="drop-icon">🖼️</div>
+      <h3>Drop your image here</h3>
+      <p>Drag & drop, <span onclick="document.getElementById('file-input').click()">click to browse</span>, or paste from clipboard</p>
+      <p style="margin-top:0.4rem;font-size:0.78rem;color:#555">PNG · JPG · WebP · GIF · BMP</p>
+    </div>
+    <div class="paste-hint">💡 <kbd>Ctrl+V</kbd> ya <kbd>Cmd+V</kbd> dabao — image seedha paste ho jaegi!</div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="controls-panel">
+    <div class="controls-grid">
+      <div class="ctrl">
+        <label>Compression Threshold</label>
+        <div class="ctrl-row">
+          <input type="range" id="threshold" min="1" max="80" value="20">
+          <span class="ctrl-val" id="thresh-val">20</span>
+        </div>
+        <div class="ctrl-hint">Low = high quality · High = more compression</div>
+      </div>
+      <div class="ctrl">
+        <label>Max Depth</label>
+        <div class="ctrl-row">
+          <input type="range" id="maxdepth" min="2" max="10" value="7">
+          <span class="ctrl-val" id="depth-val">7</span>
+        </div>
+        <div class="ctrl-hint">Higher = more detail preserved</div>
+      </div>
+      <div class="ctrl">
+        <label>Live Preview</label>
+        <div style="margin-top:0.4rem">
+          <div class="live-toggle-wrap">
+            <label class="toggle">
+              <input type="checkbox" id="live-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+            <span class="live-toggle-label" id="live-label">OFF — slider change pe auto compress</span>
+          </div>
+        </div>
+      </div>
+      <button class="btn-compress" id="compress-btn" disabled>
+        <div class="spinner"></div>
+        <span class="btn-text">⚡ Compress</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-bar">
+    <div class="stat-card" id="sc-orig">
+      <div class="stat-label">Dimensions</div>
+      <div class="stat-value" id="sv-orig">—</div>
+    </div>
+    <div class="stat-card" id="sc-origsize">
+      <div class="stat-label">Est. Original</div>
+      <div class="stat-value" id="sv-origsize">—</div>
+      <div class="stat-sub" id="sv-origsize-sub"></div>
+    </div>
+    <div class="stat-card" id="sc-compsize">
+      <div class="stat-label">Compressed</div>
+      <div class="stat-value green" id="sv-compsize">—</div>
+      <div class="stat-sub" id="sv-compsize-sub"></div>
+    </div>
+    <div class="stat-card" id="sc-nodes">
+      <div class="stat-label">Quad Nodes</div>
+      <div class="stat-value purple" id="sv-nodes">—</div>
+    </div>
+    <div class="stat-card" id="sc-ratio">
+      <div class="stat-label">Compression</div>
+      <div class="stat-value green" id="sv-ratio">—</div>
+      <div class="quality-meter" id="qual-meter" style="margin-top:0.4rem;display:none">
+        <div class="quality-bar"><div class="quality-fill" id="qual-fill" style="width:0%"></div></div>
+        <span class="quality-label" id="qual-label"></span>
+      </div>
+    </div>
+    <div class="stat-card" id="sc-depth">
+      <div class="stat-label">Max Depth</div>
+      <div class="stat-value" id="sv-depth">—</div>
+    </div>
+  </div>
+
+  <!-- VIEW MODE TABS -->
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.75rem;">
+    <div class="view-tabs" id="view-tabs">
+      <button class="view-tab active" data-view="sidebyside">↔ Side by Side</button>
+      <button class="view-tab" data-view="split">⟺ Split Compare</button>
+      <button class="view-tab" data-view="quadtree">🔲 Quadtree Grid</button>
+    </div>
+    <div style="font-family:var(--mono);font-size:0.68rem;color:var(--muted)" id="view-desc">Original & compressed side by side</div>
+  </div>
+
+  <!-- CANVAS SECTION -->
+  <div class="canvas-section">
+
+    <!-- SIDE BY SIDE (default) -->
+    <div id="view-sidebyside">
+      <div class="canvas-grid">
+        <div class="canvas-card" id="orig-card">
+          <div class="canvas-header">
+            <span class="canvas-title">Original Image</span>
+            <span class="canvas-badge badge-orig">ORIGINAL</span>
+          </div>
+          <div class="canvas-body" id="orig-body">
+            <div class="placeholder"><div class="placeholder-icon">📁</div><div>Upload an image to start</div></div>
+          </div>
+          <div class="scan-overlay" id="scan-orig"><div class="scan-line"></div></div>
+          <div class="canvas-footer">
+            <button class="btn-dl" id="dl-orig" disabled onclick="downloadCanvas('orig-canvas','original')">⬇ Download Original</button>
+          </div>
+        </div>
+        <div class="canvas-card" id="comp-card">
+          <div class="canvas-header">
+            <span class="canvas-title">Compressed Output</span>
+            <span class="canvas-badge badge-comp">QUADTREE</span>
+          </div>
+          <div class="canvas-body" id="comp-body">
+            <div class="placeholder"><div class="placeholder-icon">🔲</div><div>Compressed image appears here</div></div>
+          </div>
+          <div class="scan-overlay" id="scan-comp"><div class="scan-line"></div></div>
+          <div class="live-indicator" id="live-ind"><span class="live-indicator-dot"></span> AUTO</div>
+          <div class="canvas-footer">
+            <button class="btn-dl primary" id="dl-png" disabled onclick="downloadCanvas('comp-canvas','compressed_quadtree')">⬇ PNG</button>
+            <button class="btn-dl" id="dl-jpg" disabled onclick="downloadJPG()">⬇ JPG</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SPLIT COMPARE -->
+    <div id="view-split" style="display:none">
+      <div class="split-container" id="split-container">
+        <div class="split-header">
+          <span class="split-title">Split Compare — Drag to reveal</span>
+          <span class="split-hint">← Drag the divider →</span>
+        </div>
+        <div class="split-canvas-wrap" id="split-wrap">
+          <div class="placeholder" id="split-placeholder"><div class="placeholder-icon">⟺</div><div>Compress an image first</div></div>
+          <canvas id="split-display-canvas" style="display:none"></canvas>
+          <div class="split-divider" id="split-divider" style="display:none">
+            <div class="split-handle">◁▷</div>
+          </div>
+          <span class="split-label split-label-orig" id="split-lbl-orig" style="display:none">ORIGINAL</span>
+          <span class="split-label split-label-comp" id="split-lbl-comp" style="display:none">QUADTREE</span>
+        </div>
+        <div class="split-footer">
+          <button class="btn-dl primary" id="dl-split-png" disabled onclick="downloadCanvas('comp-canvas','compressed_quadtree')">⬇ Download PNG</button>
+          <button class="btn-dl" id="dl-split-jpg" disabled onclick="downloadJPG()">⬇ Download JPG</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- QUADTREE VISUALIZATION -->
+    <div id="view-quadtree" style="display:none">
+      <div class="canvas-card">
+        <div class="canvas-header">
+          <span class="canvas-title">Quadtree Grid Visualization</span>
+          <span class="canvas-badge badge-viz">GRID OVERLAY</span>
+        </div>
+        <div class="canvas-body" id="viz-body">
+          <div class="placeholder"><div class="placeholder-icon">🔲</div><div>Compress an image to see the quadtree grid</div></div>
+        </div>
+        <div class="canvas-footer">
+          <button class="btn-dl" id="dl-viz" disabled onclick="downloadCanvas('viz-canvas','quadtree_visualization')">⬇ Download Visualization</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- HISTORY -->
+  <div class="history-section">
+    <div class="history-title">📂 Recent Compressions</div>
+    <div class="history-list" id="history-list">
+      <div class="history-empty">Koi compression nahi hui abhi — pehle ek image compress karo!</div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer-bar">
+    <div class="footer-item"><span class="footer-dot" style="background:var(--accent)"></span><span>Quadtree Algorithm</span></div>
+    <div class="footer-item"><span class="footer-dot" style="background:var(--accent3)" style="animation-delay:0.5s"></span><span>O(n log n) Complexity</span></div>
+    <div class="footer-item"><span class="footer-dot" style="background:var(--accent2)" style="animation-delay:1s"></span><span>Analysis of Algorithms</span></div>
+    <div class="footer-item"><span class="footer-dot" style="background:#ffd166" style="animation-delay:1.5s"></span><span>Semester Project 2025</span></div>
+  </div>
+
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- HIDDEN CANVASES -->
+<canvas id="orig-canvas" style="display:none"></canvas>
+<canvas id="comp-canvas" style="display:none"></canvas>
+<canvas id="viz-canvas" style="display:none"></canvas>
+
+<!-- RATIO REVEAL -->
+<div class="ratio-reveal" id="ratio-reveal">
+  <div class="ratio-bubble">
+    <div class="big-num" id="ratio-num"></div>
+    <div class="big-label">COMPRESSION ACHIEVED</div>
+  </div>
+</div>
+
+<script>
+// ── STATE ──
+let origImageData = null;
+let nodeCount = 0, maxDepthUsed = 0;
+let liveMode = false;
+let liveDebounce = null;
+let compressionHistory = [];
+let splitRatio = 0.5;
+let isDraggingSplit = false;
+
+// ── ELEMENTS ──
+const dropZone    = document.getElementById('drop-zone');
+const fileInput   = document.getElementById('file-input');
+const compressBtn = document.getElementById('compress-btn');
+const threshSlider= document.getElementById('threshold');
+const depthSlider = document.getElementById('maxdepth');
+const origCanvas  = document.getElementById('orig-canvas');
+const compCanvas  = document.getElementById('comp-canvas');
+const vizCanvas   = document.getElementById('viz-canvas');
+const liveToggle  = document.getElementById('live-toggle');
+
+// ── PARTICLES ──
+(function() {
+  const pc = document.getElementById('particle-canvas');
+  const ctx = pc.getContext('2d');
+  let W, H, particles = [], gridP = [];
+  function resize() { W = pc.width = innerWidth; H = pc.height = innerHeight; }
+  window.addEventListener('resize', resize); resize();
+  const COLORS = ['108,99,255','67,233,123','255,101,132'];
+  for (let i=0;i<45;i++) particles.push({ x:Math.random()*W, y:Math.random()*H, r:Math.random()*2+0.5, vx:(Math.random()-0.5)*0.3, vy:(Math.random()-0.5)*0.3, color:COLORS[i%3], alpha:Math.random()*0.5+0.1, pulse:Math.random()*Math.PI*2 });
+  for (let i=0;i<15;i++) gridP.push({ x:Math.random()*W, y:Math.random()*H, size:Math.random()*50+20, alpha:Math.random()*0.03+0.01, speed:Math.random()*0.15+0.05 });
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    gridP.forEach(g => { g.y-=g.speed; if(g.y+g.size<0){g.y=H+g.size;g.x=Math.random()*W;} ctx.strokeStyle=`rgba(108,99,255,${g.alpha})`; ctx.lineWidth=0.5; ctx.strokeRect(g.x,g.y,g.size,g.size); ctx.strokeRect(g.x,g.y,g.size/2,g.size/2); ctx.strokeRect(g.x+g.size/2,g.y,g.size/2,g.size/2); });
+    particles.forEach((p,i) => { p.x+=p.vx; p.y+=p.vy; p.pulse+=0.02; if(p.x<0)p.x=W; if(p.x>W)p.x=0; if(p.y<0)p.y=H; if(p.y>H)p.y=0; const a=p.alpha*(0.7+0.3*Math.sin(p.pulse)); ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fillStyle=`rgba(${p.color},${a})`; ctx.fill(); for(let j=i+1;j<particles.length;j++){const dx=particles[j].x-p.x,dy=particles[j].y-p.y,d=Math.sqrt(dx*dx+dy*dy); if(d<100){ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(particles[j].x,particles[j].y);ctx.strokeStyle=`rgba(108,99,255,${0.07*(1-d/100)})`;ctx.lineWidth=0.5;ctx.stroke();}} });
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+})();
+
+// ── SLIDERS ──
+threshSlider.oninput = () => {
+  document.getElementById('thresh-val').textContent = threshSlider.value;
+  if (liveMode && origImageData) triggerLive();
+};
+depthSlider.oninput = () => {
+  document.getElementById('depth-val').textContent = depthSlider.value;
+  if (liveMode && origImageData) triggerLive();
+};
+
+// ── LIVE TOGGLE ──
+liveToggle.addEventListener('change', () => {
+  liveMode = liveToggle.checked;
+  document.getElementById('live-label').textContent = liveMode ? 'ON — slider change pe auto compress' : 'OFF — slider change pe auto compress';
+  document.getElementById('live-badge').style.display = liveMode ? 'flex' : 'none';
+  document.getElementById('live-ind').classList.toggle('visible', liveMode);
+  if (liveMode && origImageData) triggerLive();
+});
+
+function triggerLive() {
+  clearTimeout(liveDebounce);
+  liveDebounce = setTimeout(() => runCompression(false), 300);
+}
+
+// ── VIEW TABS ──
+const viewDescs = { sidebyside:'Original & compressed side by side', split:'Drag the divider to compare original vs compressed', quadtree:'See the quadtree grid overlay on the compressed image' };
+document.querySelectorAll('.view-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const v = tab.dataset.view;
+    document.getElementById('view-sidebyside').style.display = v==='sidebyside' ? '' : 'none';
+    document.getElementById('view-split').style.display = v==='split' ? '' : 'none';
+    document.getElementById('view-quadtree').style.display = v==='quadtree' ? '' : 'none';
+    document.getElementById('view-desc').textContent = viewDescs[v];
+    if (v==='split' && origImageData && compCanvas.width>0) { setTimeout(updateSplitView, 50); }
+    if (v==='quadtree' && origImageData) updateVizView();
+  });
+});
+
+// ── DRAG & DROP ──
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); const f=e.dataTransfer.files[0]; if(f&&f.type.startsWith('image/')) loadFile(f); });
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => { if(fileInput.files[0]) loadFile(fileInput.files[0]); });
+document.addEventListener('paste', e => { const items=e.clipboardData?.items; if(!items) return; for(const item of items){if(item.type.startsWith('image/')){const f=item.getAsFile(); if(f){loadFile(f); showToast('📋 Image paste ho gayi!');} break;}} });
+
+// ── LOAD FILE ──
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      let w=img.width, h=img.height;
+      const maxW=900, maxH=900;
+      if(w>maxW||h>maxH){ const r=Math.min(maxW/w,maxH/h); w=Math.round(w*r); h=Math.round(h*r); }
+      origCanvas.width=w; origCanvas.height=h;
+      const ctx=origCanvas.getContext('2d');
+      ctx.drawImage(img,0,0,w,h);
+      origImageData=ctx.getImageData(0,0,w,h);
+
+      // Flash and scan
+      const so=document.getElementById('scan-orig');
+      so.classList.remove('scanning'); void so.offsetWidth; so.classList.add('scanning');
+      setTimeout(()=>so.classList.remove('scanning'),900);
+      dropZone.classList.remove('uploaded'); void dropZone.offsetWidth; dropZone.classList.add('uploaded');
+
+      showImageOnCard('orig-body', origCanvas);
+      animateStat('sv-orig', w+'×'+h);
+      const origKB = Math.round(w*h*3/1024);
+      animateStat('sv-origsize', formatSize(origKB));
+      document.getElementById('sv-origsize-sub').textContent = 'Raw pixels (est.)';
+      document.getElementById('sc-orig').classList.add('active');
+      document.getElementById('sc-origsize').classList.add('active');
+
+      // Reset comp side
+      document.getElementById('comp-body').innerHTML='<div class="placeholder"><div class="placeholder-icon">⚡</div><div>Click Compress to process</div></div>';
+      animateStat('sv-nodes','—'); animateStat('sv-ratio','—'); animateStat('sv-depth','—'); animateStat('sv-compsize','—');
+      document.getElementById('sv-compsize-sub').textContent='';
+      document.getElementById('qual-meter').style.display='none';
+      setDownload(false);
+      document.getElementById('dl-orig').disabled=false;
+      compressBtn.disabled=false;
+
+      const origCard=document.getElementById('orig-card');
+      origCard.classList.remove('revealed'); void origCard.offsetWidth; origCard.classList.add('revealed');
+
+      if(liveMode) triggerLive();
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function formatSize(kb) {
+  if(kb<1024) return kb+'KB';
+  return (kb/1024).toFixed(1)+'MB';
+}
+
+function showImageOnCard(bodyId, canvas) {
+  const body=document.getElementById(bodyId);
+  const d=document.createElement('canvas');
+  d.width=canvas.width; d.height=canvas.height;
+  d.className='display';
+  d.getContext('2d').drawImage(canvas,0,0);
+  body.innerHTML=''; body.appendChild(d);
+}
+
+function animateStat(id, val) {
+  const el=document.getElementById(id);
+  el.classList.remove('animating'); void el.offsetWidth;
+  el.textContent=val;
+  el.classList.add('animating');
+}
+
+// ── COMPRESS BUTTON ──
+compressBtn.addEventListener('click', () => runCompression(true));
+
+function runCompression(showReveal=true) {
+  if(!origImageData) return;
+  const compBody=document.getElementById('comp-body');
+  compBody.classList.add('loading');
+  compBody.innerHTML='<div class="placeholder"><div style="font-family:var(--mono);font-size:0.78rem;color:var(--muted)">Processing…</div></div>';
+  compressBtn.classList.add('loading');
+  compressBtn.disabled=true;
+
+  setTimeout(() => {
+    const threshold=parseInt(threshSlider.value);
+    const maxDepth=parseInt(depthSlider.value);
+    compCanvas.width=origCanvas.width; compCanvas.height=origCanvas.height;
+    const ctx=compCanvas.getContext('2d');
+    ctx.fillStyle='#000'; ctx.fillRect(0,0,compCanvas.width,compCanvas.height);
+    nodeCount=0; maxDepthUsed=0;
+    runQuadtree(origImageData.data, ctx, 0, 0, origCanvas.width, origCanvas.height, 0, threshold, maxDepth);
+
+    // Stats
+    const total=origCanvas.width*origCanvas.height;
+    const origKB=Math.round(total*3/1024);
+    const ratio=Math.max(0,Math.round((1-nodeCount/total)*100));
+    const compKB=Math.round(origKB*(1-ratio/100));
+
+    // PSNR quality score (rough estimate)
+    const quality = calcQuality(ratio);
+
+    animateStat('sv-nodes',nodeCount.toLocaleString());
+    animateStat('sv-ratio',ratio+'%');
+    animateStat('sv-depth',maxDepthUsed);
+    animateStat('sv-compsize',formatSize(compKB));
+    document.getElementById('sv-compsize-sub').textContent=ratio+'% smaller';
+    document.getElementById('sv-ratio').classList.add('green');
+    document.getElementById('sv-nodes').classList.add('purple');
+    ['sc-nodes','sc-ratio','sc-depth','sc-compsize'].forEach(id=>document.getElementById(id).classList.add('active'));
+
+    // Quality meter
+    const qm=document.getElementById('qual-meter');
+    qm.style.display='flex';
+    document.getElementById('qual-fill').style.width=quality.pct+'%';
+    document.getElementById('qual-fill').style.background=quality.color;
+    document.getElementById('qual-label').textContent=quality.label;
+
+    compBody.classList.remove('loading');
+    showImageOnCard('comp-body',compCanvas);
+
+    // Scan comp
+    const sc=document.getElementById('scan-comp');
+    sc.classList.remove('scanning'); void sc.offsetWidth; sc.classList.add('scanning');
+    setTimeout(()=>sc.classList.remove('scanning'),900);
+    const compCard=document.getElementById('comp-card');
+    compCard.classList.remove('glow-flash','revealed'); void compCard.offsetWidth; compCard.classList.add('glow-flash','revealed');
+
+    if(showReveal) showRatioReveal(ratio);
+    setDownload(true);
+    compressBtn.classList.remove('loading');
+    compressBtn.disabled=false;
+    showToast('✅ Done! '+ratio+'% compressed · '+nodeCount.toLocaleString()+' nodes');
+
+    // Update split & viz if visible
+    const activeTab=document.querySelector('.view-tab.active')?.dataset.view;
+    if(activeTab==='split') setTimeout(updateSplitView, 50);
+    if(activeTab==='quadtree') updateVizView();
+
+    // Save to history
+    saveHistory(ratio, origKB, compKB, threshold, maxDepth);
+  }, 60);
+}
+
+function calcQuality(ratio) {
+  if(ratio<20) return {pct:92,label:'Excellent',color:'#43e97b'};
+  if(ratio<40) return {pct:75,label:'Good',color:'#43e97b'};
+  if(ratio<60) return {pct:55,label:'Fair',color:'#ffd166'};
+  return {pct:35,label:'Heavy',color:'#ff6584'};
+}
+
+// ── QUADTREE ──
+function getStats(data, x, y, w, h, W) {
+  let rS=0,gS=0,bS=0,n=0;
+  for(let j=y;j<y+h;j++) for(let i=x;i<x+w;i++){const idx=(j*W+i)*4;rS+=data[idx];gS+=data[idx+1];bS+=data[idx+2];n++;}
+  const rA=rS/n,gA=gS/n,bA=bS/n;
+  let v=0;
+  for(let j=y;j<y+h;j++) for(let i=x;i<x+w;i++){const idx=(j*W+i)*4;v+=(data[idx]-rA)**2+(data[idx+1]-gA)**2+(data[idx+2]-bA)**2;}
+  return {v:v/n,r:Math.round(rA),g:Math.round(gA),b:Math.round(bA)};
+}
+
+function runQuadtree(data, ctx, x, y, w, h, depth, threshold, maxDepth) {
+  if(w<1||h<1) return;
+  nodeCount++;
+  if(depth>maxDepthUsed) maxDepthUsed=depth;
+  const W=origCanvas.width;
+  const {v,r,g,b}=getStats(data,x,y,w,h,W);
+  if(v<threshold*threshold*3||depth>=maxDepth||w<=1||h<=1){
+    ctx.fillStyle=`rgb(${r},${g},${b})`;
+    ctx.fillRect(x,y,w,h);
+    if(w>6&&h>6){ctx.strokeStyle='rgba(0,0,0,0.08)';ctx.lineWidth=0.5;ctx.strokeRect(x+0.5,y+0.5,w-1,h-1);}
+    return;
+  }
+  const hw=Math.floor(w/2),hh=Math.floor(h/2);
+  runQuadtree(data,ctx,x,   y,   hw,   hh,   depth+1,threshold,maxDepth);
+  runQuadtree(data,ctx,x+hw,y,   w-hw, hh,   depth+1,threshold,maxDepth);
+  runQuadtree(data,ctx,x,   y+hh,hw,   h-hh, depth+1,threshold,maxDepth);
+  runQuadtree(data,ctx,x+hw,y+hh,w-hw, h-hh, depth+1,threshold,maxDepth);
+}
+
+// ── VISUALIZATION MODE ──
+function runQuadtreeViz(data, ctx, x, y, w, h, depth, threshold, maxDepth) {
+  if(w<1||h<1) return;
+  const W=origCanvas.width;
+  const {v,r,g,b}=getStats(data,x,y,w,h,W);
+  if(v<threshold*threshold*3||depth>=maxDepth||w<=1||h<=1){
+    ctx.fillStyle=`rgb(${r},${g},${b})`;
+    ctx.fillRect(x,y,w,h);
+    // Draw grid lines with color based on depth
+    const hue=(depth/maxDepth)*240;
+    ctx.strokeStyle=`hsla(${hue},80%,65%,0.7)`;
+    ctx.lineWidth=depth===0?2:1;
+    ctx.strokeRect(x+0.5,y+0.5,w-1,h-1);
+    return;
+  }
+  const hw=Math.floor(w/2),hh=Math.floor(h/2);
+  runQuadtreeViz(data,ctx,x,   y,   hw,   hh,   depth+1,threshold,maxDepth);
+  runQuadtreeViz(data,ctx,x+hw,y,   w-hw, hh,   depth+1,threshold,maxDepth);
+  runQuadtreeViz(data,ctx,x,   y+hh,hw,   h-hh, depth+1,threshold,maxDepth);
+  runQuadtreeViz(data,ctx,x+hw,y+hh,w-hw, h-hh, depth+1,threshold,maxDepth);
+}
+
+function updateVizView() {
+  if(!origImageData) return;
+  vizCanvas.width=origCanvas.width; vizCanvas.height=origCanvas.height;
+  const ctx=vizCanvas.getContext('2d');
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,vizCanvas.width,vizCanvas.height);
+  runQuadtreeViz(origImageData.data, ctx, 0, 0, origCanvas.width, origCanvas.height, 0, parseInt(threshSlider.value), parseInt(depthSlider.value));
+  showImageOnCard('viz-body', vizCanvas);
+  document.getElementById('dl-viz').disabled=false;
+}
+
+// ── SPLIT VIEW (single-canvas draw approach) ──
+let splitCanvas = null; // will be set on first use
+
+function updateSplitView() {
+  if(!origImageData || compCanvas.width===0) return;
+
+  const wrap = document.getElementById('split-wrap');
+  const dispCanvas = document.getElementById('split-display-canvas');
+  splitCanvas = dispCanvas;
+
+  const maxW = wrap.clientWidth || 700;
+  const maxH = 520;
+  const scale = Math.min(maxW / origCanvas.width, maxH / origCanvas.height, 1);
+  const dispW = Math.round(origCanvas.width * scale);
+  const dispH = Math.round(origCanvas.height * scale);
+
+  // Set display canvas size = pixel dimensions for sharp rendering
+  dispCanvas.width = dispW;
+  dispCanvas.height = dispH;
+  dispCanvas.style.display = 'block';
+  dispCanvas.style.width = dispW + 'px';
+  dispCanvas.style.height = dispH + 'px';
+
+  wrap.style.height = dispH + 'px';
+
+  // Draw both sides
+  drawSplit(dispW, dispH);
+
+  // Show UI elements
+  document.getElementById('split-placeholder').style.display = 'none';
+  document.getElementById('split-divider').style.display = 'block';
+  document.getElementById('split-lbl-orig').style.display = 'block';
+  document.getElementById('split-lbl-comp').style.display = 'block';
+
+  // Position divider
+  updateSplitDivider(dispW, dispH);
+  document.getElementById('dl-split-png').disabled = false;
+  document.getElementById('dl-split-jpg').disabled = false;
+}
+
+function drawSplit(dispW, dispH) {
+  if(!splitCanvas) return;
+  const ctx = splitCanvas.getContext('2d');
+  const splitPx = Math.round(dispW * splitRatio);
+
+  // Draw full original image on left side
+  ctx.drawImage(origCanvas, 0, 0, origCanvas.width, origCanvas.height, 0, 0, dispW, dispH);
+
+  // Draw compressed on right side (using clip)
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(splitPx, 0, dispW - splitPx, dispH);
+  ctx.clip();
+  ctx.drawImage(compCanvas, 0, 0, compCanvas.width, compCanvas.height, 0, 0, dispW, dispH);
+  ctx.restore();
+
+  // Draw divider line ON the canvas itself
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  ctx.moveTo(splitPx, 0);
+  ctx.lineTo(splitPx, dispH);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function updateSplitDivider(dispW, dispH) {
+  const wrap = document.getElementById('split-wrap');
+  const divider = document.getElementById('split-divider');
+  const wrapW = wrap.clientWidth;
+  // Center the image in the wrap
+  const offsetX = (wrapW - dispW) / 2;
+  const splitPx = offsetX + dispW * splitRatio;
+  divider.style.left = splitPx + 'px';
+}
+
+// Mouse / touch events on the WRAP (not just divider)
+const splitWrap = document.getElementById('split-wrap');
+
+function getSplitRatioFromEvent(clientX) {
+  const wrap = document.getElementById('split-wrap');
+  const rect = wrap.getBoundingClientRect();
+  if(!splitCanvas) return splitRatio;
+  const dispW = splitCanvas.width;
+  const offsetX = (rect.width - dispW) / 2;
+  const relX = clientX - rect.left - offsetX;
+  return Math.max(0.02, Math.min(0.98, relX / dispW));
+}
+
+splitWrap.addEventListener('mousedown', e => { isDraggingSplit = true; e.preventDefault(); });
+document.addEventListener('mousemove', e => {
+  if(!isDraggingSplit) return;
+  splitRatio = getSplitRatioFromEvent(e.clientX);
+  if(splitCanvas) {
+    drawSplit(splitCanvas.width, splitCanvas.height);
+    updateSplitDivider(splitCanvas.width, splitCanvas.height);
+  }
+});
+document.addEventListener('mouseup', () => isDraggingSplit = false);
+
+splitWrap.addEventListener('touchstart', e => { isDraggingSplit = true; e.preventDefault(); }, {passive:false});
+document.addEventListener('touchmove', e => {
+  if(!isDraggingSplit) return;
+  splitRatio = getSplitRatioFromEvent(e.touches[0].clientX);
+  if(splitCanvas) {
+    drawSplit(splitCanvas.width, splitCanvas.height);
+    updateSplitDivider(splitCanvas.width, splitCanvas.height);
+  }
+}, {passive:true});
+document.addEventListener('touchend', () => isDraggingSplit = false);
+
+// ── HISTORY ──
+function saveHistory(ratio, origKB, compKB, threshold, depth) {
+  const thumb=document.createElement('canvas');
+  thumb.width=44; thumb.height=44;
+  const tc=thumb.getContext('2d');
+  tc.drawImage(compCanvas,0,0,44,44);
+
+  compressionHistory.unshift({thumb:thumb.toDataURL(),ratio,origKB,compKB,threshold,depth,time:new Date().toLocaleTimeString()});
+  if(compressionHistory.length>4) compressionHistory.pop();
+  renderHistory();
+}
+
+function renderHistory() {
+  const list=document.getElementById('history-list');
+  if(!compressionHistory.length){ list.innerHTML='<div class="history-empty">Abhi koi history nahi</div>'; return; }
+  list.innerHTML=compressionHistory.map((h,i)=>`
+    <div class="history-item" onclick="loadHistory(${i})">
+      <img class="history-thumb" src="${h.thumb}" alt="thumb">
+      <div class="history-meta">
+        <div class="history-name">${h.time}</div>
+        <div class="history-stats">T:${h.threshold} D:${h.depth} · ${formatSize(h.origKB)}→${formatSize(h.compKB)}</div>
+      </div>
+      <div class="history-ratio">${h.ratio}%</div>
+    </div>
+  `).join('');
+}
+
+function loadHistory(i) {
+  const h=compressionHistory[i];
+  threshSlider.value=h.threshold;
+  depthSlider.value=h.depth;
+  document.getElementById('thresh-val').textContent=h.threshold;
+  document.getElementById('depth-val').textContent=h.depth;
+  showToast(`📂 History loaded — Threshold:${h.threshold}, Depth:${h.depth}`);
+  runCompression(false);
+}
+
+// ── RATIO REVEAL ──
+function showRatioReveal(ratio) {
+  const el=document.getElementById('ratio-reveal');
+  document.getElementById('ratio-num').textContent=ratio+'%';
+  el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),1500);
+}
+
+// ── DOWNLOADS ──
+function downloadCanvas(id, name) {
+  const a=document.createElement('a');
+  a.download=name+'.png';
+  a.href=document.getElementById(id).toDataURL('image/png');
+  a.click();
+  showToast('📥 PNG download shuru ho gayi!');
+}
+function downloadJPG() {
+  const a=document.createElement('a');
+  a.download='compressed_quadtree.jpg';
+  a.href=compCanvas.toDataURL('image/jpeg',0.92);
+  a.click();
+  showToast('📥 JPG download shuru ho gayi!');
+}
+function setDownload(enabled) {
+  ['dl-png','dl-jpg','dl-split-png','dl-split-jpg','dl-viz'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.disabled=!enabled;
+  });
+}
+
+// ── TOAST ──
+let toastTimer;
+function showToast(msg) {
+  const t=document.getElementById('toast');
+  t.textContent=msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>t.classList.remove('show'),3000);
+}
+</script>
+</body>
+</html>
